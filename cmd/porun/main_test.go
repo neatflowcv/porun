@@ -23,7 +23,7 @@ func TestRunListUsesDetectedHost(t *testing.T) {
 		newContainerSummary("1234567890abcdef", []string{"demo"}, "running", "alpine:latest"),
 	}
 
-	app, stdout := newTestApp(runtime)
+	app, stdout, _ := newTestApp(runtime)
 	app.detectHost = func() (string, error) {
 		return "unix:///detected.sock", nil
 	}
@@ -48,7 +48,7 @@ func TestRunCreateUsesExplicitHostAndGeneratedName(t *testing.T) {
 
 	runtime := newFakeRuntime()
 	runtime.createID = "container-123"
-	app, stdout := newTestApp(runtime)
+	app, stdout, _ := newTestApp(runtime)
 	app.detectHost = func() (string, error) {
 		t.Fatal("detectHost should not be called when --host is provided")
 
@@ -96,7 +96,7 @@ func TestRunCreateAllowsImageDefaultCommand(t *testing.T) {
 	t.Parallel()
 
 	runtime := newFakeRuntime()
-	app, _ := newTestApp(runtime)
+	app, _, _ := newTestApp(runtime)
 
 	err := run(app, []string{"create", "--image", "alpine:latest"})
 	if err != nil {
@@ -113,7 +113,7 @@ func TestRunDeleteStartAndLogs(t *testing.T) {
 
 	runtime := newFakeRuntime()
 	runtime.logs = "line one"
-	app, stdout := newTestApp(runtime)
+	app, stdout, _ := newTestApp(runtime)
 
 	for _, args := range [][]string{
 		{"delete", testContainerID},
@@ -145,10 +145,70 @@ func TestRunDeleteStartAndLogs(t *testing.T) {
 	}
 }
 
+func TestRunExecWritesStdoutAndStderr(t *testing.T) {
+	t.Parallel()
+
+	runtime := newFakeRuntime()
+	runtime.execStdout = "hello\n"
+	runtime.execStderr = "warn\n"
+	app, stdout, stderr := newTestApp(runtime)
+
+	err := run(app, []string{"exec", testContainerID, `echo "hello"`})
+	if err != nil {
+		t.Fatalf("run exec: %v", err)
+	}
+
+	if runtime.execContainer != testContainerID {
+		t.Fatalf("exec container = %q", runtime.execContainer)
+	}
+
+	if runtime.execCommand != `echo "hello"` {
+		t.Fatalf("exec command = %q", runtime.execCommand)
+	}
+
+	if got := stdout.String(); got != "hello\n" {
+		t.Fatalf("stdout = %q", got)
+	}
+
+	if got := stderr.String(); got != "warn\n" {
+		t.Fatalf("stderr = %q", got)
+	}
+}
+
+func TestRunExecReturnsExitStatusError(t *testing.T) {
+	t.Parallel()
+
+	runtime := newFakeRuntime()
+	runtime.execExitCode = 17
+	app, stdout, stderr := newTestApp(runtime)
+
+	err := run(app, []string{"exec", testContainerID, "false"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	var exitErr *exitStatusError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected exitStatusError, got %v", err)
+	}
+
+	if exitErr.code != 17 {
+		t.Fatalf("exit code = %d", exitErr.code)
+	}
+
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestRunPropagatesRuntimeFactoryError(t *testing.T) {
 	t.Parallel()
 
-	app, _ := newTestApp(newFakeRuntime())
+	app, _, _ := newTestApp(newFakeRuntime())
 	app.newRuntime = func(context.Context, string) (porun.Runtime, error) {
 		return nil, errBoom
 	}
@@ -164,26 +224,38 @@ func TestRunPropagatesRuntimeFactoryError(t *testing.T) {
 }
 
 type fakeRuntime struct {
-	host        string
-	containers  []porun.ContainerSummary
-	createID    string
-	createdSpec porun.ContainerSpec
-	deleted     string
-	started     string
-	logged      string
-	logs        string
+	host          string
+	containers    []porun.ContainerSummary
+	createID      string
+	createdSpec   porun.ContainerSpec
+	deleted       string
+	started       string
+	logged        string
+	logs          string
+	execContainer string
+	execCommand   string
+	execStdout    string
+	execStderr    string
+	execExitCode  int
+	execErr       error
 }
 
 func newFakeRuntime() *fakeRuntime {
 	return &fakeRuntime{
-		host:        "",
-		containers:  nil,
-		createID:    "",
-		createdSpec: porun.ContainerSpec{Name: "", Image: "", Command: nil},
-		deleted:     "",
-		started:     "",
-		logged:      "",
-		logs:        "",
+		host:          "",
+		containers:    nil,
+		createID:      "",
+		createdSpec:   porun.ContainerSpec{Name: "", Image: "", Command: nil},
+		deleted:       "",
+		started:       "",
+		logged:        "",
+		logs:          "",
+		execContainer: "",
+		execCommand:   "",
+		execStdout:    "",
+		execStderr:    "",
+		execExitCode:  0,
+		execErr:       nil,
 	}
 }
 
@@ -226,6 +298,13 @@ func (f *fakeRuntime) GetContainerLogs(_ context.Context, containerID string) (s
 	return f.logs, nil
 }
 
+func (f *fakeRuntime) ExecContainer(_ context.Context, containerID, command string) (string, string, int, error) {
+	f.execContainer = containerID
+	f.execCommand = command
+
+	return f.execStdout, f.execStderr, f.execExitCode, f.execErr
+}
+
 func (f *fakeRuntime) WaitForContainer(context.Context, string) (int32, error) {
 	return 0, nil
 }
@@ -236,7 +315,7 @@ func (f *fakeRuntime) RemoveContainer(_ context.Context, containerID string) err
 	return nil
 }
 
-func newTestApp(runtime *fakeRuntime) (*App, *bytes.Buffer) {
+func newTestApp(runtime *fakeRuntime) (*App, *bytes.Buffer, *bytes.Buffer) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 
@@ -251,5 +330,5 @@ func newTestApp(runtime *fakeRuntime) (*App, *bytes.Buffer) {
 	}
 	app.commandTimeout = time.Second
 
-	return app, stdout
+	return app, stdout, stderr
 }
