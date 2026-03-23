@@ -2,7 +2,10 @@ module github.com/neatflowcv/porun
 
 go 1.26.1
 
-require github.com/containers/podman/v5 v5.8.1
+require (
+	github.com/alecthomas/kong v1.14.0
+	github.com/containers/podman/v5 v5.8.1
+)
 
 require (
 	dario.cat/mergo v1.0.2 // indirect
