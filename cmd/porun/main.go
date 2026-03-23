@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -34,6 +35,7 @@ type CLI struct {
 	Delete deleteCmd `cmd:""                                                                          help:"Delete a container."`
 	Start  startCmd  `cmd:""                                                                          help:"Start a container."`
 	Logs   logsCmd   `cmd:""                                                                          help:"Show container logs."`
+	Exec   execCmd   `cmd:""                                                                          help:"Run a shell command in a container."`
 }
 
 type listCmd struct{}
@@ -57,11 +59,29 @@ type logsCmd struct {
 	Container string `arg:"" help:"Container ID or name." name:"container"`
 }
 
+type execCmd struct {
+	Container string `arg:"" help:"Container ID or name."                      name:"container"`
+	Command   string `arg:"" help:"Shell command to run inside the container." name:"command"`
+}
+
+type exitStatusError struct {
+	code int
+}
+
+func (e *exitStatusError) Error() string {
+	return fmt.Sprintf("command exited with code %d", e.code)
+}
+
 func main() {
 	app := newApp(os.Stdout, os.Stderr)
 
 	err := run(app, os.Args[1:])
 	if err != nil {
+		var exitErr *exitStatusError
+		if errors.As(err, &exitErr) {
+			os.Exit(exitErr.code)
+		}
+
 		writeLinef(app.stderr, "error: %v", err)
 		os.Exit(1)
 	}
@@ -207,6 +227,30 @@ func (cmd *logsCmd) Run(app *App, cli *CLI) error {
 
 	if logs != "" && !strings.HasSuffix(logs, "\n") {
 		writeString(app.stdout, "\n")
+	}
+
+	return nil
+}
+
+func (cmd *execCmd) Run(app *App, cli *CLI) error {
+	ctx, cancel := context.WithTimeout(context.Background(), app.commandTimeout)
+	defer cancel()
+
+	runtime, err := app.runtime(ctx, cli.Host)
+	if err != nil {
+		return err
+	}
+
+	stdout, stderr, exitCode, err := runtime.ExecContainer(ctx, cmd.Container, cmd.Command)
+	if err != nil {
+		return fmt.Errorf("exec in container %s: %w", cmd.Container, err)
+	}
+
+	writeString(app.stdout, stdout)
+	writeString(app.stderr, stderr)
+
+	if exitCode != 0 {
+		return &exitStatusError{code: exitCode}
 	}
 
 	return nil
