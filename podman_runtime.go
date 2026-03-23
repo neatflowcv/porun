@@ -1,15 +1,19 @@
 package porun
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
+	"github.com/containers/podman/v5/pkg/api/handlers"
 	"github.com/containers/podman/v5/pkg/bindings"
 	"github.com/containers/podman/v5/pkg/bindings/containers"
 	"github.com/containers/podman/v5/pkg/bindings/images"
 	"github.com/containers/podman/v5/pkg/specgen"
+	dockerContainer "github.com/docker/docker/api/types/container"
 )
 
 const cleanupTimeout = 15 * time.Second
@@ -120,6 +124,67 @@ func (r *PodmanRuntime) StartContainer(ctx context.Context, containerID string) 
 	}
 
 	return nil
+}
+
+func (r *PodmanRuntime) ExecContainer(
+	ctx context.Context,
+	containerID, command string,
+) (string, string, int, error) {
+	connCtx, err := r.connectionContext(ctx)
+	if err != nil {
+		return "", "", 0, err
+	}
+
+	execConfig := &handlers.ExecCreateConfig{
+		ExecOptions: dockerContainer.ExecOptions{
+			User:         "",
+			Privileged:   false,
+			Tty:          false,
+			ConsoleSize:  nil,
+			AttachStdin:  false,
+			AttachStdout: true,
+			AttachStderr: true,
+			DetachKeys:   "",
+			Env:          nil,
+			WorkingDir:   "",
+			Cmd:          []string{"/bin/sh", "-lc", command},
+			Detach:       false,
+		},
+	}
+
+	sessionID, err := containers.ExecCreate(connCtx, containerID, execConfig)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("create exec session for container %s: %w", containerID, err)
+	}
+
+	defer removeExecSession(connCtx, sessionID)
+
+	var (
+		stdoutBuffer bytes.Buffer
+		stderrBuffer bytes.Buffer
+	)
+
+	stdoutWriter := io.Writer(&stdoutBuffer)
+	stderrWriter := io.Writer(&stderrBuffer)
+
+	options := new(containers.ExecStartAndAttachOptions).
+		WithOutputStream(stdoutWriter).
+		WithErrorStream(stderrWriter).
+		WithAttachOutput(true).
+		WithAttachError(true).
+		WithAttachInput(false)
+
+	err = containers.ExecStartAndAttach(connCtx, sessionID, options)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("start exec session %s for container %s: %w", sessionID, containerID, err)
+	}
+
+	inspect, err := containers.ExecInspect(connCtx, sessionID, nil)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("inspect exec session %s for container %s: %w", sessionID, containerID, err)
+	}
+
+	return stdoutBuffer.String(), stderrBuffer.String(), inspect.ExitCode, nil
 }
 
 func (r *PodmanRuntime) GetContainerLogs(ctx context.Context, containerID string) (string, error) {
@@ -248,4 +313,11 @@ func streamContainerLogs(
 	}
 
 	errCh <- nil
+}
+
+func removeExecSession(ctx context.Context, sessionID string) {
+	err := containers.ExecRemove(ctx, sessionID, nil)
+	if err != nil {
+		return
+	}
 }

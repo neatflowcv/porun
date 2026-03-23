@@ -21,6 +21,7 @@ type Runtime interface {
 	ListContainers(ctx context.Context) ([]ContainerSummary, error)
 	CreateContainer(ctx context.Context, spec ContainerSpec) (string, error)
 	StartContainer(ctx context.Context, containerID string) error
+	ExecContainer(ctx context.Context, containerID, command string) (stdout string, stderr string, exitCode int, err error)
 	GetContainerLogs(ctx context.Context, containerID string) (string, error)
 	WaitForContainer(ctx context.Context, containerID string) (int32, error)
 	RemoveContainer(ctx context.Context, containerID string) error
