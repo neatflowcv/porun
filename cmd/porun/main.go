@@ -42,9 +42,10 @@ type listCmd struct{}
 
 //nolint:lll // kong struct tags are long and clearer when kept on the field they describe.
 type createCmd struct {
-	Image   string   `help:"Container image."                               placeholder:"IMAGE"                                 required:""`
+	Image   string   `help:"Container image."                                                  placeholder:"IMAGE"                                 required:""`
 	Name    string   `help:"Container name. Defaults to porun-<timestamp>."`
-	Command []string `arg:""                                                help:"Optional command. Defaults to image command." name:"command" optional:"" passthrough:""`
+	Volumes []string `help:"Bind mount or volume in Podman format. Repeat to add more mounts." short:"v"`
+	Command []string `arg:""                                                                   help:"Optional command. Defaults to image command." name:"command" optional:"" passthrough:""`
 }
 
 type deleteCmd struct {
@@ -156,6 +157,7 @@ func (cmd *createCmd) Run(app *App, cli *CLI) error {
 		Name:    cmd.Name,
 		Image:   cmd.Image,
 		Command: cmd.Command,
+		Volumes: cmd.Volumes,
 	}
 	if spec.Name == "" {
 		spec.Name = fmt.Sprintf("porun-%d", app.now().UnixNano())

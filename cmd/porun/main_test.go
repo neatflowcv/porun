@@ -12,6 +12,7 @@ import (
 )
 
 const testContainerID = "abc123"
+const helloLine = "hello\n"
 
 var errBoom = errors.New("boom")
 
@@ -108,6 +109,27 @@ func TestRunCreateAllowsImageDefaultCommand(t *testing.T) {
 	}
 }
 
+func TestRunCreateAllowsMultipleVolumes(t *testing.T) {
+	t.Parallel()
+
+	runtime := newFakeRuntime()
+	app, _, _ := newTestApp(runtime)
+
+	err := run(app, []string{
+		"create",
+		"--image", "quay.io/ceph/ceph:v18.2.7",
+		"-v", "./ceph-config:/etc/ceph",
+		"-v", "/tmp/data:/var/lib/ceph:Z",
+	})
+	if err != nil {
+		t.Fatalf("run create: %v", err)
+	}
+
+	if got := runtime.createdSpec.Volumes; strings.Join(got, "|") != "./ceph-config:/etc/ceph|/tmp/data:/var/lib/ceph:Z" {
+		t.Fatalf("created volumes = %#v", got)
+	}
+}
+
 func TestRunDeleteStartAndLogs(t *testing.T) {
 	t.Parallel()
 
@@ -149,7 +171,7 @@ func TestRunExecWritesStdoutAndStderr(t *testing.T) {
 	t.Parallel()
 
 	runtime := newFakeRuntime()
-	runtime.execStdout = "hello\n"
+	runtime.execStdout = helloLine
 	runtime.execStderr = "warn\n"
 	app, stdout, stderr := newTestApp(runtime)
 
@@ -166,7 +188,7 @@ func TestRunExecWritesStdoutAndStderr(t *testing.T) {
 		t.Fatalf("exec command = %q", runtime.execCommand)
 	}
 
-	if got := stdout.String(); got != "hello\n" {
+	if got := stdout.String(); got != helloLine {
 		t.Fatalf("stdout = %q", got)
 	}
 
@@ -245,7 +267,7 @@ func newFakeRuntime() *fakeRuntime {
 		host:          "",
 		containers:    nil,
 		createID:      "",
-		createdSpec:   porun.ContainerSpec{Name: "", Image: "", Command: nil},
+		createdSpec:   porun.ContainerSpec{Name: "", Image: "", Command: nil, Volumes: nil},
 		deleted:       "",
 		started:       "",
 		logged:        "",
@@ -305,7 +327,7 @@ func (f *fakeRuntime) ExecContainer(_ context.Context, containerID, command stri
 	return f.execStdout, f.execStderr, f.execExitCode, f.execErr
 }
 
-func (f *fakeRuntime) WaitForContainer(context.Context, string) (int32, error) {
+func (f *fakeRuntime) WaitForContainer(_ context.Context, containerID string) (int32, error) {
 	return 0, nil
 }
 

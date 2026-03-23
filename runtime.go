@@ -6,6 +6,7 @@ type ContainerSpec struct {
 	Name    string
 	Image   string
 	Command []string
+	Volumes []string
 }
 
 type ContainerSummary struct {

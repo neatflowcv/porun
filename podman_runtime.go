@@ -104,6 +104,11 @@ func (r *PodmanRuntime) CreateContainer(ctx context.Context, spec ContainerSpec)
 	containerSpec.Terminal = new(bool)
 	containerSpec.Remove = new(bool)
 
+	err = applyVolumeMounts(containerSpec, spec.Volumes)
+	if err != nil {
+		return "", fmt.Errorf("configure volumes for container %s: %w", spec.Name, err)
+	}
+
 	response, err := containers.CreateWithSpec(connCtx, containerSpec, nil)
 	if err != nil {
 		return "", fmt.Errorf("create container %s: %w", spec.Name, err)
@@ -257,6 +262,31 @@ func (r *PodmanRuntime) connectionContext(ctx context.Context) (context.Context,
 	}
 
 	return connCtx, nil
+}
+
+func applyVolumeMounts(containerSpec *specgen.SpecGenerator, volumes []string) error {
+	if len(volumes) == 0 {
+		return nil
+	}
+
+	mounts, namedVolumes, overlayVolumes, err := specgen.GenVolumeMounts(volumes)
+	if err != nil {
+		return fmt.Errorf("generate volume mounts: %w", err)
+	}
+
+	for _, mount := range mounts {
+		containerSpec.Mounts = append(containerSpec.Mounts, mount)
+	}
+
+	for _, volume := range namedVolumes {
+		containerSpec.Volumes = append(containerSpec.Volumes, volume)
+	}
+
+	for _, overlayVolume := range overlayVolumes {
+		containerSpec.OverlayVolumes = append(containerSpec.OverlayVolumes, overlayVolume)
+	}
+
+	return nil
 }
 
 func collectLogOutput(stdoutCh, stderrCh <-chan string, resultCh chan<- string) {
