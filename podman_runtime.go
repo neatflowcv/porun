@@ -1,9 +1,8 @@
-package main
+package porun
 
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -42,12 +41,8 @@ func (r *PodmanRuntime) EnsureImageAvailable(ctx context.Context, image string) 
 	}
 
 	if exists {
-		writeLinef(os.Stdout, "image already present: %s", image)
-
 		return nil
 	}
-
-	writeLinef(os.Stdout, "pulling image %s", image)
 
 	_, err = images.Pull(connCtx, image, nil)
 	if err != nil {
