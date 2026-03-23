@@ -13,6 +13,8 @@ import (
 	"github.com/neatflowcv/porun"
 )
 
+const defaultCommandTimeout = 2 * time.Minute
+
 type runtimeFactory func(context.Context, string) (porun.Runtime, error)
 
 type App struct {
@@ -24,6 +26,7 @@ type App struct {
 	commandTimeout time.Duration
 }
 
+//nolint:lll // kong struct tags are long and clearer when kept on the field they describe.
 type CLI struct {
 	Host   string    `help:"Podman service host. Defaults to CONTAINER_HOST or auto-detected socket."`
 	List   listCmd   `cmd:""                                                                          help:"List containers."`
@@ -35,6 +38,7 @@ type CLI struct {
 
 type listCmd struct{}
 
+//nolint:lll // kong struct tags are long and clearer when kept on the field they describe.
 type createCmd struct {
 	Image   string   `help:"Container image."                               placeholder:"IMAGE"                                 required:""`
 	Name    string   `help:"Container name. Defaults to porun-<timestamp>."`
@@ -70,7 +74,7 @@ func newApp(stdout, stderr io.Writer) *App {
 		detectHost:     porun.DetectPodmanURI,
 		newRuntime:     newPodmanRuntime,
 		now:            time.Now,
-		commandTimeout: 2 * time.Minute,
+		commandTimeout: defaultCommandTimeout,
 	}
 }
 
@@ -84,15 +88,20 @@ func run(app *App, args []string) error {
 		kong.Bind(app),
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("build cli parser: %w", err)
 	}
 
 	ctx, err := parser.Parse(args)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse cli args: %w", err)
 	}
 
-	return ctx.Run(app)
+	err = ctx.Run(app)
+	if err != nil {
+		return fmt.Errorf("run command: %w", err)
+	}
+
+	return nil
 }
 
 func (cmd *listCmd) Run(app *App, cli *CLI) error {
@@ -106,7 +115,7 @@ func (cmd *listCmd) Run(app *App, cli *CLI) error {
 
 	containers, err := runtime.ListContainers(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("list containers: %w", err)
 	}
 
 	printContainerSummaries(app.stdout, containers)
@@ -134,7 +143,7 @@ func (cmd *createCmd) Run(app *App, cli *CLI) error {
 
 	containerID, err := runtime.CreateContainer(ctx, spec)
 	if err != nil {
-		return err
+		return fmt.Errorf("create container %s: %w", spec.Name, err)
 	}
 
 	writeLinef(app.stdout, "created %s (%s)", spec.Name, containerID)
@@ -151,8 +160,9 @@ func (cmd *deleteCmd) Run(app *App, cli *CLI) error {
 		return err
 	}
 
-	if err := runtime.RemoveContainer(ctx, cmd.Container); err != nil {
-		return err
+	err = runtime.RemoveContainer(ctx, cmd.Container)
+	if err != nil {
+		return fmt.Errorf("delete container %s: %w", cmd.Container, err)
 	}
 
 	writeLinef(app.stdout, "deleted %s", cmd.Container)
@@ -169,8 +179,9 @@ func (cmd *startCmd) Run(app *App, cli *CLI) error {
 		return err
 	}
 
-	if err := runtime.StartContainer(ctx, cmd.Container); err != nil {
-		return err
+	err = runtime.StartContainer(ctx, cmd.Container)
+	if err != nil {
+		return fmt.Errorf("start container %s: %w", cmd.Container, err)
 	}
 
 	writeLinef(app.stdout, "started %s", cmd.Container)
@@ -189,7 +200,7 @@ func (cmd *logsCmd) Run(app *App, cli *CLI) error {
 
 	logs, err := runtime.GetContainerLogs(ctx, cmd.Container)
 	if err != nil {
-		return err
+		return fmt.Errorf("get logs for container %s: %w", cmd.Container, err)
 	}
 
 	writeString(app.stdout, logs)
@@ -201,6 +212,7 @@ func (cmd *logsCmd) Run(app *App, cli *CLI) error {
 	return nil
 }
 
+//nolint:ireturn // The CLI is intentionally wired against the library runtime interface for testability.
 func (app *App) runtime(ctx context.Context, host string) (porun.Runtime, error) {
 	resolvedHost := host
 	if resolvedHost == "" {
@@ -215,8 +227,14 @@ func (app *App) runtime(ctx context.Context, host string) (porun.Runtime, error)
 	return app.newRuntime(ctx, resolvedHost)
 }
 
+//nolint:ireturn // The CLI factory returns the library runtime interface used by command handlers.
 func newPodmanRuntime(ctx context.Context, host string) (porun.Runtime, error) {
-	return porun.NewPodmanRuntime(ctx, host)
+	runtime, err := porun.NewPodmanRuntime(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("create podman runtime: %w", err)
+	}
+
+	return runtime, nil
 }
 
 func printContainerSummaries(out io.Writer, summaries []porun.ContainerSummary) {
