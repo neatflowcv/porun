@@ -1,4 +1,4 @@
-module porun
+module github.com/neatflowcv/porun
 
 go 1.26.1
 
