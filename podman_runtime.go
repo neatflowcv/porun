@@ -57,6 +57,42 @@ func (r *PodmanRuntime) EnsureImageAvailable(ctx context.Context, image string) 
 	return nil
 }
 
+func (r *PodmanRuntime) ListContainers(ctx context.Context) ([]ContainerSummary, error) {
+	connCtx, err := r.connectionContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	all := true
+	options := &containers.ListOptions{
+		All:       &all,
+		External:  nil,
+		Filters:   nil,
+		Last:      nil,
+		Namespace: nil,
+		Size:      nil,
+		Sync:      nil,
+	}
+
+	list, err := containers.List(connCtx, options)
+	if err != nil {
+		return nil, fmt.Errorf("list containers: %w", err)
+	}
+
+	summaries := make([]ContainerSummary, 0, len(list))
+	for _, item := range list {
+		summaries = append(summaries, ContainerSummary{
+			ID:     item.ID,
+			Names:  item.Names,
+			Image:  item.Image,
+			State:  item.State,
+			Status: item.Status,
+		})
+	}
+
+	return summaries, nil
+}
+
 func (r *PodmanRuntime) CreateContainer(ctx context.Context, spec ContainerSpec) (string, error) {
 	connCtx, err := r.connectionContext(ctx)
 	if err != nil {

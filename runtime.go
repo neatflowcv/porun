@@ -8,8 +8,17 @@ type ContainerSpec struct {
 	Command []string
 }
 
+type ContainerSummary struct {
+	ID     string
+	Names  []string
+	Image  string
+	State  string
+	Status string
+}
+
 type Runtime interface {
 	EnsureImageAvailable(ctx context.Context, image string) error
+	ListContainers(ctx context.Context) ([]ContainerSummary, error)
 	CreateContainer(ctx context.Context, spec ContainerSpec) (string, error)
 	StartContainer(ctx context.Context, containerID string) error
 	GetContainerLogs(ctx context.Context, containerID string) (string, error)

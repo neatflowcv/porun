@@ -46,6 +46,13 @@ func run() error {
 
 	writeLinef(os.Stdout, "connecting to %s", uri)
 
+	summaries, err := runtime.ListContainers(ctx)
+	if err != nil {
+		return fmt.Errorf("list containers: %w", err)
+	}
+
+	printContainerSummaries(summaries)
+
 	err = runtime.EnsureImageAvailable(ctx, imageName)
 	if err != nil {
 		return err
@@ -125,6 +132,45 @@ func checkSocket(path string) error {
 	}
 
 	return nil
+}
+
+func printContainerSummaries(summaries []ContainerSummary) {
+	if len(summaries) == 0 {
+		writeString(os.Stdout, "containers:\n")
+		writeString(os.Stdout, "  (none)\n")
+
+		return
+	}
+
+	writeString(os.Stdout, "containers:\n")
+
+	for _, summary := range summaries {
+		writeLinef(
+			os.Stdout,
+			"  - %s | %s | %s | %s",
+			shortContainerID(summary.ID),
+			formatContainerNames(summary.Names),
+			summary.State,
+			summary.Image,
+		)
+	}
+}
+
+func shortContainerID(containerID string) string {
+	const shortIDLength = 12
+	if len(containerID) <= shortIDLength {
+		return containerID
+	}
+
+	return containerID[:shortIDLength]
+}
+
+func formatContainerNames(names []string) string {
+	if len(names) == 0 {
+		return "(unnamed)"
+	}
+
+	return strings.Join(names, ",")
 }
 
 func waitForCompletion(ctx context.Context, runtime Runtime, containerID string) (string, int32, error) {
